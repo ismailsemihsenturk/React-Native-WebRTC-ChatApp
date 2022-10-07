@@ -20,6 +20,9 @@ import {
   registerGlobals,
 } from "react-native-webrtc";
 
+
+import uuid from 'react-native-uuid';
+
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, onValue, set } from "firebase/database";
 import {
@@ -30,7 +33,6 @@ import {
   MESSAGING_SENDER_ID,
   APP_ID
 } from "@env";
-
 
 const firebaseConfig = {
   apiKey: API_KEY,
@@ -138,8 +140,8 @@ export default function App() {
       return;
     }
 
-    const refCandidate = ref(DB, "calls/" + uniqueId + "/" + "refCandidate");
-    set(refCandidate, {
+    const offerCanditate = ref(DB, "calls/" + uniqueId + "/" + "offerCanditate");
+    set(offerCanditate, {
       candidate: event.candidate,
     });
     // Send the event.candidate onto the person you're calling.
@@ -224,8 +226,6 @@ export default function App() {
 
   const startCall = async () => {
 
-    console.log(firebaseConfig)
-
     const offerDescription = await PC.createOffer();
 
     const offer = {
@@ -233,7 +233,7 @@ export default function App() {
       type: offerDescription.type,
     };
 
-    uniqueId = "abc";
+    uniqueId = uuid.v4();
 
     const SdpOffer = ref(DB, "calls/" + uniqueId);
     set(SdpOffer, {
