@@ -140,8 +140,8 @@ export default function App() {
       return;
     }
 
-    const offerCanditate = ref(DB, "calls/" + uniqueId + "/" + "offerCanditate");
-    set(offerCanditate, {
+    const offerCandidate = ref(DB, "calls/" + uniqueId + "/" + "offerCandidate");
+    set(offerCandidate, {
       candidate: event.candidate,
     });
     // Send the event.candidate onto the person you're calling.
