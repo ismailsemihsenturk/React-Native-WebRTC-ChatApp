@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Button,
   SafeAreaView,
@@ -7,6 +7,10 @@ import {
   View,
   Text,
   StatusBar,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableOpacity,
 } from "react-native";
 import {
   ScreenCapturePickerView,
@@ -20,8 +24,7 @@ import {
   registerGlobals,
 } from "react-native-webrtc";
 
-
-import uuid from 'react-native-uuid';
+import uuid from "react-native-uuid";
 
 import { initializeApp } from "firebase/app";
 import { getDatabase, ref, onValue, set } from "firebase/database";
@@ -31,7 +34,7 @@ import {
   PROJECT_ID,
   STORAGE_BUCKET,
   MESSAGING_SENDER_ID,
-  APP_ID
+  APP_ID,
 } from "@env";
 
 const firebaseConfig = {
@@ -49,6 +52,11 @@ const DB = getDatabase();
 export default function App() {
   const [localStream, setLocalStream] = useState();
   const [remoteStream, setRemoteStream] = useState();
+  const [myMessage, setMyMessage] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [roomId, setRoomId] = useState();
+  const [join, setJoin] = useState(false);
+  const scrollViewRef = useRef(ScrollView);
   let uniqueId;
 
   const configuration = {
@@ -133,22 +141,6 @@ export default function App() {
     }
   });
 
-  PC.addEventListener("icecandidate", (event) => {
-    // When you find a null candidate then there are no more candidates.
-    // Gathering of candidates has finished.
-    if (!event.candidate) {
-      return;
-    }
-
-    const offerCandidate = ref(DB, "calls/" + uniqueId + "/" + "offerCandidate");
-    set(offerCandidate, {
-      candidate: event.candidate,
-    });
-    // Send the event.candidate onto the person you're calling.
-    // Keeping to Trickle ICE Standards, you should send the candidates immediately.
-    console.log("event canditate: " + JSON.stringify(event));
-  });
-
   PC.addEventListener("iceconnectionstatechange", (event) => {
     switch (PC.iceConnectionState) {
       case "connected":
@@ -198,18 +190,12 @@ export default function App() {
     console.log("remote stream " + JSON.stringify(event));
   });
 
+
+  
   PC.addEventListener("datachannel", (event) => {
-    let datachannel = event.channel;
-    console.log("datachannel " + datachannel);
+    console.log("datachannel " + event);
     // Now you've got the datachannel.
     // You can hookup and use the same events as above ^
-  });
-
-  PC.addEventListener("track", (event) => {
-    event.streams[0].getTracks().forEach((track) => {
-      setRemoteStream([...remoteStream, track]);
-    });
-    console.log("track event");
   });
 
   dataChannel.addEventListener("open", (event) => {
@@ -224,8 +210,54 @@ export default function App() {
     console.log("dataChannel message " + JSON.stringify(message));
   });
 
-  const startCall = async () => {
 
+
+  PC.addEventListener("icecandidate", (event) => {
+    // When you find a null candidate then there are no more candidates.
+    // Gathering of candidates has finished.
+    if (!event.candidate) {
+      return;
+    }
+
+    console.log("localDesc: " + PC.localDescription);
+    console.log("remoteDesc: " + PC.remoteDescription);
+
+    if (PC.localDescription !== null) {
+      const offerCandidate = ref(
+        DB,
+        "calls/" + uniqueId + "/" + "offerCandidate"
+      );
+      set(offerCandidate, {
+        candidate: event.candidate,
+      });
+    }
+
+    if (PC.remoteDescription !== null) {
+      const answerCandidate = ref(
+        DB,
+        "calls/" + uniqueId + "/" + "answerCandidate"
+      );
+      set(answerCandidate, {
+        candidate: event.candidate,
+      });
+    }
+
+    // Send the event.candidate onto the person you're calling.
+    // Keeping to Trickle ICE Standards, you should send the candidates immediately.
+    console.log("event canditate: " + JSON.stringify(event));
+  });
+
+  PC.addEventListener("track", (event) => {
+    event.streams[0].getTracks().forEach((track) => {
+      setRemoteStream([...remoteStream, track]);
+    });
+    console.log("track event");
+  });
+
+ 
+
+
+  const startCall = async () => {
     const offerDescription = await PC.createOffer();
 
     const offer = {
@@ -241,7 +273,15 @@ export default function App() {
     });
 
     await PC.setLocalDescription(offerDescription);
+
+  
   };
+
+  const joinCall = async () => {
+    setJoin(true);
+  };
+
+  const sendMessage = async () => {};
 
   const closeStreams = () => {
     setLocalStream();
@@ -250,18 +290,51 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {!localStream && (
-        <Button title="Click to start stream" onPress={startLocalStream} />
-      )}
-      {localStream && (
-        <Button
-          title="Click to start call"
-          onPress={startCall}
-          disabled={remoteStream}
-        />
-      )}
+      <View style={styles.chatButton}>
+        {!localStream && (
+          <View style={styles.buttonItem}>
+            <Button title="Click to start stream" onPress={startLocalStream} />
+          </View>
+        )}
+        {localStream && (
+          <View style={styles.buttonItem}>
+            <Button
+              title="Click to start call"
+              onPress={startCall}
+              disabled={remoteStream}
+            />
+          </View>
+        )}
+        {!join && localStream && (
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.roomWrapper}
+          >
+            <TextInput
+              style={styles.roomInput}
+              placeholder={"Room Id"}
+              onChangeText={(text) => setRoomId(text)}
+              value={roomId}
+            />
+            <TouchableOpacity onPress={() => joinCall()}>
+              <View>
+                <Text style={styles.roomWrapperButton}>Join Call</Text>
+              </View>
+            </TouchableOpacity>
+          </KeyboardAvoidingView>
+        )}
+        {localStream && remoteStream && (
+          <View style={styles.buttonItem}>
+            <Button
+              title="Click to stop call"
+              onPress={closeStreams}
+              disabled={!remoteStream}
+            />
+          </View>
+        )}
+      </View>
 
-      <View style={styles.rtcview}>
+      <View style={styles.rtcView}>
         {localStream && (
           <RTCView
             style={styles.rtc}
@@ -270,7 +343,7 @@ export default function App() {
           />
         )}
       </View>
-      <View style={styles.rtcview}>
+      <View style={styles.rtcView}>
         {remoteStream && (
           <RTCView
             style={styles.rtc}
@@ -279,34 +352,166 @@ export default function App() {
           />
         )}
       </View>
-      <Button
-        title="Click to stop call"
-        onPress={closeStreams}
-        disabled={!remoteStream}
-      />
+
+      <ScrollView
+        style={styles.scrollView}
+        ref={scrollViewRef}
+        onContentSizeChange={() =>
+          scrollViewRef.current.scrollToEnd({ animated: true })
+        }
+      >
+        <View style={styles.chatBox}>
+          <Text style={[styles.chatItems, styles.chatItemsSender]}>Deneme</Text>
+          <Text style={[styles.chatItems, styles.chatItemsReceiver]}>
+            Deneme
+          </Text>
+          <Text style={[styles.chatItems]}> Deneme </Text>
+          <Text style={[styles.chatItems]}> Deneme </Text>
+          <Text style={[styles.chatItems]}> Deneme </Text>
+          <Text style={[styles.chatItems]}> Deneme </Text>
+          <Text style={[styles.chatItems]}> Deneme </Text>
+          <Text style={[styles.chatItems]}> Deneme </Text>
+          <Text style={[styles.chatItems]}> Deneme </Text>
+          <Text style={[styles.chatItems]}> Deneme </Text>
+          <Text style={[styles.chatItems]}> Deneme2 </Text>
+        </View>
+      </ScrollView>
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.messageWrapper}
+      >
+        <TextInput
+          style={styles.messageInput}
+          placeholder={"Message"}
+          onChangeText={(text) => setMyMessage(text)}
+          value={myMessage}
+        />
+        <TouchableOpacity onPress={() => sendMessage()}>
+          <View style={styles.messageWrapperButton}>
+            <Text>+</Text>
+          </View>
+        </TouchableOpacity>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: "#313131",
+    backgroundColor: "black",
     justifyContent: "space-between",
     alignItems: "center",
     height: "100%",
   },
+  chatButton: {
+    margin: 5,
+    padding: 5,
+    justifyContent: "space-evenly",
+    display: "flex",
+    flexDirection: "row",
+  },
+  buttonItem: {
+    margin: 10,
+  },
   text: {
     fontSize: 30,
   },
-  rtcview: {
+  rtcView: {
     justifyContent: "center",
     alignItems: "center",
-    height: "40%",
+    height: "30%",
     width: "80%",
     backgroundColor: "black",
   },
   rtc: {
     width: "80%",
     height: "100%",
+  },
+  scrollView: {
+    position: "relative",
+    backgroundColor: "black",
+    marginHorizontal: 10,
+    width: "100%",
+    padding: 10,
+    margin: 10,
+    bottom: 55,
+  },
+  chatBox: {
+    position: "relative",
+    justifyContent: "space-between",
+    alignItems: "center",
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+  },
+  chatItems: {
+    borderRadius: 50,
+    margin: 5,
+    padding: 5,
+    color: "white",
+    flex: 1,
+  },
+  chatItemsSender: {
+    position: "absolute",
+    right: 0,
+    backgroundColor: "red",
+  },
+  chatItemsReceiver: {
+    position: "absolute",
+    left: 0,
+    backgroundColor: "blue",
+  },
+  roomInput: {
+    paddingVertical: 2,
+    paddingHorizontal: 5,
+    backgroundColor: "#FFF",
+    width: 150,
+    borderColor: "#C0C0C0",
+    borderWidth: 1,
+  },
+  messageInput: {
+    paddingVertical: 15,
+    paddingHorizontal: 15,
+    backgroundColor: "#FFF",
+    borderRadius: 60,
+    width: 300,
+    borderColor: "#C0C0C0",
+    borderWidth: 1,
+  },
+  roomWrapperButton: {
+    width: 60,
+    height: 35,
+    paddingVertical: 6,
+    paddingHorizontal: 3,
+    backgroundColor: "#2196F3",
+    color: "white",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+  },
+  messageWrapperButton: {
+    width: 60,
+    height: 30,
+    backgroundColor: "white",
+    borderRadius: 60,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+  },
+  roomWrapper: {
+    width: "50%",
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+  },
+  messageWrapper: {
+    position: "absolute",
+    bottom: 0,
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    backgroundColor: "#f2f0f0",
   },
 });
