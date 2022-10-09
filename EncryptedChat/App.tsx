@@ -27,7 +27,7 @@ import {
 import uuid from "react-native-uuid";
 
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, onValue, set } from "firebase/database";
+import { getDatabase, ref, onValue, set, get, child } from "firebase/database";
 import {
   API_KEY,
   AUTH_DOMAIN,
@@ -47,7 +47,7 @@ const firebaseConfig = {
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
-const DB = getDatabase();
+const DB = getDatabase(firebaseApp);
 
 export default function App() {
   const [localStream, setLocalStream] = useState();
@@ -55,10 +55,13 @@ export default function App() {
   const [myMessage, setMyMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [roomId, setRoomId] = useState();
+  const [uniqueId, setUniqueId] = useState();
   const [join, setJoin] = useState(false);
   const scrollViewRef = useRef(ScrollView);
-  let uniqueId;
-
+  let hostId;
+ 
+  
+  
   const configuration = {
     iceServers: [
       {
@@ -66,11 +69,15 @@ export default function App() {
       },
     ],
   };
-  const PC = useMemo(
-    () => new RTCPeerConnection(configuration),
-    [configuration]
-  );
+  
+  const PC = new RTCPeerConnection(configuration);
+  // Set new peerConn for the remote
+  const PCRemote = new RTCPeerConnection(configuration);
   const dataChannel = useMemo(() => PC.createDataChannel("chat_channel"), [PC]);
+
+
+
+
 
   const startLocalStream = async () => {
     const isFront = true;
@@ -168,8 +175,8 @@ export default function App() {
     switch (PC.signalingState) {
       case "closed":
         // You can handle the call being disconnected here.
-
         break;
+        
       case "stable":
         console.log("stable " + JSON.stringify(event));
         break;
@@ -177,8 +184,11 @@ export default function App() {
       case "have-local-offer":
         console.log("local offer " + JSON.stringify(event));
         break;
+
       case "have-remote-offer":
         console.log("remote offer " + JSON.stringify(event));
+        break;
+
       default:
         break;
     }
@@ -190,8 +200,6 @@ export default function App() {
     console.log("remote stream " + JSON.stringify(event));
   });
 
-
-  
   PC.addEventListener("datachannel", (event) => {
     console.log("datachannel " + event);
     // Now you've got the datachannel.
@@ -211,7 +219,6 @@ export default function App() {
   });
 
 
-
   PC.addEventListener("icecandidate", (event) => {
     // When you find a null candidate then there are no more candidates.
     // Gathering of candidates has finished.
@@ -219,34 +226,61 @@ export default function App() {
       return;
     }
 
-    console.log("localDesc: " + PC.localDescription);
-    console.log("remoteDesc: " + PC.remoteDescription);
+    const dbRef = ref(DB);
 
-    if (PC.localDescription !== null) {
-      const offerCandidate = ref(
-        DB,
-        "calls/" + uniqueId + "/" + "offerCandidate"
-      );
-      set(offerCandidate, {
-        candidate: event.candidate,
+    get(child(dbRef, "calls/" + hostId + "/" + "offerCandidate"))
+      .then((snapshot) => {
+        if (snapshot.exists()) {
+          console.log(snapshot.val());
+        } else {
+          const offerCandidate = ref(
+            DB,
+            "calls/" + hostId + "/" + "offerCandidate/"
+          );
+          set(offerCandidate, {
+            candidate: event.candidate,
+          });
+        }
+      })
+      .catch((error) => {
+        console.error(error);
       });
-    }
 
-    if (PC.remoteDescription !== null) {
-      const answerCandidate = ref(
-        DB,
-        "calls/" + uniqueId + "/" + "answerCandidate"
-      );
-      set(answerCandidate, {
-        candidate: event.candidate,
-      });
-    }
-
-    // Send the event.candidate onto the person you're calling.
-    // Keeping to Trickle ICE Standards, you should send the candidates immediately.
-    console.log("event canditate: " + JSON.stringify(event));
+    console.log("canditate: " + JSON.stringify(event));
   });
 
+
+  //ICECandidate listener for remote
+  PCRemote.addEventListener("icecandidate", (event) => {
+
+    if (!event.candidate) {
+      return;
+    }
+
+    const dbRef = ref(DB);
+  
+    get(child(dbRef, "calls/" + roomId + "/" + "answerCandidate"))
+      .then((snapshot) => {
+        if (snapshot.exists()) {
+          console.log(snapshot.val());
+        } else {
+          const answerCandidate = ref(
+            DB,
+            "calls/" + roomId + "/" + "answerCandidate/"
+          );
+          set(answerCandidate, {
+            candidate: event.candidate,
+          });
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+      });
+      console.log("remote canditate: " + JSON.stringify(event));
+  });
+
+
+  //Add remote stream to the video obj
   PC.addEventListener("track", (event) => {
     event.streams[0].getTracks().forEach((track) => {
       setRemoteStream([...remoteStream, track]);
@@ -254,38 +288,113 @@ export default function App() {
     console.log("track event");
   });
 
- 
+   //Add remote stream to the video obj
+   PCRemote.addEventListener("track", (event) => {
+    event.streams[0].getTracks().forEach((track) => {
+      setRemoteStream([...remoteStream, track]);
+    });
+    console.log("track event - REMOTE");
+  });
 
 
+  // Initiate the offer and  localDesc then add it to the db
   const startCall = async () => {
     const offerDescription = await PC.createOffer();
+    await PC.setLocalDescription(offerDescription);
 
     const offer = {
       sdp: offerDescription.sdp,
       type: offerDescription.type,
     };
 
-    uniqueId = uuid.v4();
+    hostId = uuid.v4();
+    setUniqueId(hostId);
 
-    const SdpOffer = ref(DB, "calls/" + uniqueId);
-    set(SdpOffer, {
+    const SdpOffer = ref(DB, "calls/" + hostId + "/" + "offer");
+    await set(SdpOffer, {
       offer: offer,
     });
 
-    await PC.setLocalDescription(offerDescription);
+   
+  };
 
   
-  };
+  //Listen for the answer and add it into remoteDesc
+  onValue(ref(DB, "calls/" + uniqueId + "/"+ "answer"), (snapshot) => {
+    const data = snapshot.val();
+    if (data !== null) {
+      const answerDescription = data.answer;
+      PC.setRemoteDescription(answerDescription);
+    }
+  });
 
+
+  //Listen for the answerCandidate and add it into ICE Candidate
+  onValue(
+    ref(DB, "calls/" + uniqueId + "/" + "answerCandidate"),
+    (snapshot) => {
+      if(snapshot.val() !== null){
+        snapshot?.forEach((candidateObj) => {
+          const newCandidate = new RTCIceCandidate(candidateObj);
+          PC.addIceCandidate(new RTCIceCandidate(newCandidate));
+          console.log("RTC Candidate: " + JSON.stringify(newCandidate));
+        });
+      }
+     
+    }
+  );
+
+  //Listen for the offerCandidate and add it into ICE Candidate
+  onValue(ref(DB, "calls/" + roomId + "/" + "offerCandidate"), (snapshot) => {
+    if(join){
+      snapshot?.forEach((candidateObj) => {
+        const newCandidate = new RTCIceCandidate(candidateObj);
+        PCRemote.addIceCandidate(new RTCIceCandidate(newCandidate));
+        console.log("RTC Remote Candidate: " + JSON.stringify(newCandidate));
+      });
+    }
+  });
+
+
+  // Join the remote call
   const joinCall = async () => {
+   
+    // Get the offer from db and answer it
+    const dbRef = ref(DB);
+    let snapshot = await get(child(dbRef, "calls/" + roomId));
+    if (snapshot !== null) {
+      const data = snapshot.val();
+      const offerDesc = data.offer?.offer;
+      await PCRemote.setRemoteDescription(offerDesc);
+
+      const answerDescription = await PCRemote.createAnswer();
+      await PCRemote.setLocalDescription(answerDescription);
+
+      const answer = {
+        type: answerDescription.type,
+        sdp: answerDescription.sdp,
+      };
+
+      const SdpAnswer = ref(DB, "calls/" + roomId + "/" + "answer");
+      await set(SdpAnswer, {
+        answer: answer,
+      });
+    }
+
     setJoin(true);
+
   };
 
-  const sendMessage = async () => {};
 
+  const sendMessage = () => {
+   
+  };
+
+  // Close
   const closeStreams = () => {
     setLocalStream();
     setRemoteStream();
+    setJoin(false);
   };
 
   return (
@@ -296,7 +405,7 @@ export default function App() {
             <Button title="Click to start stream" onPress={startLocalStream} />
           </View>
         )}
-        {localStream && (
+        {!join && localStream && (
           <View style={styles.buttonItem}>
             <Button
               title="Click to start call"
@@ -498,6 +607,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
+    borderColor: "#C0C0C0",
   },
   roomWrapper: {
     width: "50%",
