@@ -57,10 +57,21 @@ export default function App() {
   const [roomId, setRoomId] = useState();
   const [uniqueId, setUniqueId] = useState();
   const [join, setJoin] = useState(false);
+  const [pConn,setPConn] = useState();
+  const [rpConn,setRPConn] = useState();
   const scrollViewRef = useRef(ScrollView);
+
+  const [answerData, setAnswerData] = useState();
+  const [answerDataBoolean, setAnswerDataBoolean] = useState(false);
+  const sdpAnswers = useRef([]);
+
+
+
+
   let hostId;
+
+
  
-  
   
   const configuration = {
     iceServers: [
@@ -70,10 +81,11 @@ export default function App() {
     ],
   };
   
-  const PC = new RTCPeerConnection(configuration);
+  let PC = new RTCPeerConnection(configuration);
   // Set new peerConn for the remote
-  const PCRemote = new RTCPeerConnection(configuration);
-  const dataChannel = useMemo(() => PC.createDataChannel("chat_channel"), [PC]);
+  let PCRemote = new RTCPeerConnection(configuration);
+
+  const dataChannel = PC.createDataChannel("chat_channel");
 
 
 
@@ -297,6 +309,9 @@ export default function App() {
   });
 
 
+
+
+
   // Initiate the offer and  localDesc then add it to the db
   const startCall = async () => {
     const offerDescription = await PC.createOffer();
@@ -316,33 +331,74 @@ export default function App() {
     });
 
    
+    setPConn(PC);
+    console.log("start PC: "+JSON.stringify(PC))
   };
 
   
   //Listen for the answer and add it into remoteDesc
   onValue(ref(DB, "calls/" + uniqueId + "/"+ "answer"), (snapshot) => {
     const data = snapshot.val();
-    if (data !== null) {
+    if (data !== null && uniqueId !== undefined) {
+
       const answerDescription = data.answer;
-      PC.setRemoteDescription(answerDescription);
+      sdpAnswers.current.push(data.answer);
+
+      console.log("sdpAnswerRef Len: "+sdpAnswers.current.length)
+
+     let infiniteLoop = sdpAnswers.current.includes(data.answer);
+
+      if(sdpAnswers.current.length >= 2){
+        console.log("2 oldu")
+        if(infiniteLoop === false){
+          console.log("infinite yok girdi")
+          if(!answerDataBoolean){
+            setAnswerData(answerDescription)
+            setAnswerDataBoolean(true)
+          }
+        }
+        if(infiniteLoop){
+          console.log("infinite");
+          sdpAnswers.current.pop();
+        }
+      }
+      else{
+        console.log("1 oldu")
+        if(!answerDataBoolean){
+          console.log("1 oldu girdi")
+          setAnswerData(answerDescription)
+          setAnswerDataBoolean(true)
+        }
+      }
     }
   });
 
 
+  if(answerDataBoolean){
+    console.log("oldu: "+ JSON.stringify(answerData))
+    console.log("local: "+ JSON.stringify(pConn))
+
+    // set PC == pConn
+    PC.setRemoteDescription(answerData);
+    setAnswerDataBoolean(false)
+  }
+
+
+  //APPLY SAME LOGIC
   //Listen for the answerCandidate and add it into ICE Candidate
-  onValue(
-    ref(DB, "calls/" + uniqueId + "/" + "answerCandidate"),
-    (snapshot) => {
-      if(snapshot.val() !== null){
-        snapshot?.forEach((candidateObj) => {
-          const newCandidate = new RTCIceCandidate(candidateObj);
-          PC.addIceCandidate(new RTCIceCandidate(newCandidate));
-          console.log("RTC Candidate: " + JSON.stringify(newCandidate));
-        });
-      }
+  // onValue(
+  //   ref(DB, "calls/" + uniqueId + "/" + "answerCandidate"),
+  //   (snapshot) => {
+  //     if(snapshot.val() !== null){
+  //       snapshot?.forEach((candidateObj) => {
+  //         const newCandidate = new RTCIceCandidate(candidateObj);
+  //         PC.addIceCandidate(new RTCIceCandidate(newCandidate));
+  //         console.log("RTC Candidate: " + JSON.stringify(newCandidate));
+  //       });
+  //     }
      
-    }
-  );
+  //   }
+  // );
 
   //Listen for the offerCandidate and add it into ICE Candidate
   onValue(ref(DB, "calls/" + roomId + "/" + "offerCandidate"), (snapshot) => {
@@ -355,6 +411,7 @@ export default function App() {
     }
   });
 
+ 
 
   // Join the remote call
   const joinCall = async () => {
@@ -381,6 +438,7 @@ export default function App() {
       });
     }
 
+    setRPConn(PCRemote);
     setJoin(true);
 
   };
