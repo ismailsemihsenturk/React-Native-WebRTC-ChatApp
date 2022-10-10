@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   TouchableOpacity,
+  SnapshotViewIOS,
 } from "react-native";
 import {
   ScreenCapturePickerView,
@@ -54,25 +55,30 @@ export default function App() {
   const [remoteStream, setRemoteStream] = useState();
   const [myMessage, setMyMessage] = useState("");
   const [messages, setMessages] = useState([]);
-  const [roomId, setRoomId] = useState();
-  const [uniqueId, setUniqueId] = useState();
   const [join, setJoin] = useState(false);
-  const [pConn,setPConn] = useState();
-  const [rpConn,setRPConn] = useState();
+  const [pConn, setPConn] = useState();
+  const [rpConn, setRPConn] = useState();
   const scrollViewRef = useRef(ScrollView);
 
   const [answerData, setAnswerData] = useState();
   const [answerDataBoolean, setAnswerDataBoolean] = useState(false);
-  const sdpAnswers = useRef([]);
+  const sdpAnswers = useRef(new Array());
 
+  const [offerCandidateData, setOfferCandidateData] = useState(new Array());
+  const [offerCandidateDataBoolean, setOfferCandidateDataBoolean] =
+    useState(false);
+  const offerCandidates = useRef(new Array());
 
+  const [answerCandidateData, setAnswerCandidateData] = useState(new Array());
+  const [answerCandidateDataBoolean, setAnswerCandidateDataBoolean] =
+    useState(false);
+  const answerCandidates = useRef(new Array());
 
-
+  const [roomId, setRoomId] = useState();
+  const [uniqueId, setUniqueId] = useState();
+  const [uniqueHostId, setUniqueHostId] = useState();
   let hostId;
 
-
- 
-  
   const configuration = {
     iceServers: [
       {
@@ -80,16 +86,12 @@ export default function App() {
       },
     ],
   };
-  
+
   let PC = new RTCPeerConnection(configuration);
   // Set new peerConn for the remote
   let PCRemote = new RTCPeerConnection(configuration);
 
   const dataChannel = PC.createDataChannel("chat_channel");
-
-
-
-
 
   const startLocalStream = async () => {
     const isFront = true;
@@ -188,7 +190,7 @@ export default function App() {
       case "closed":
         // You can handle the call being disconnected here.
         break;
-        
+
       case "stable":
         console.log("stable " + JSON.stringify(event));
         break;
@@ -230,7 +232,6 @@ export default function App() {
     console.log("dataChannel message " + JSON.stringify(message));
   });
 
-
   PC.addEventListener("icecandidate", (event) => {
     // When you find a null candidate then there are no more candidates.
     // Gathering of candidates has finished.
@@ -243,7 +244,7 @@ export default function App() {
     get(child(dbRef, "calls/" + hostId + "/" + "offerCandidate"))
       .then((snapshot) => {
         if (snapshot.exists()) {
-          console.log(snapshot.val());
+          // console.log(snapshot.val());
         } else {
           const offerCandidate = ref(
             DB,
@@ -258,23 +259,21 @@ export default function App() {
         console.error(error);
       });
 
-    console.log("canditate: " + JSON.stringify(event));
+    // console.log("canditate: " + JSON.stringify(event));
   });
-
 
   //ICECandidate listener for remote
   PCRemote.addEventListener("icecandidate", (event) => {
-
     if (!event.candidate) {
       return;
     }
 
     const dbRef = ref(DB);
-  
+
     get(child(dbRef, "calls/" + roomId + "/" + "answerCandidate"))
       .then((snapshot) => {
         if (snapshot.exists()) {
-          console.log(snapshot.val());
+          // console.log(snapshot.val());
         } else {
           const answerCandidate = ref(
             DB,
@@ -288,9 +287,8 @@ export default function App() {
       .catch((error) => {
         console.error(error);
       });
-      console.log("remote canditate: " + JSON.stringify(event));
+    // console.log("remote canditate: " + JSON.stringify(event));
   });
-
 
   //Add remote stream to the video obj
   PC.addEventListener("track", (event) => {
@@ -300,17 +298,13 @@ export default function App() {
     console.log("track event");
   });
 
-   //Add remote stream to the video obj
-   PCRemote.addEventListener("track", (event) => {
+  //Add remote stream to the video obj
+  PCRemote.addEventListener("track", (event) => {
     event.streams[0].getTracks().forEach((track) => {
       setRemoteStream([...remoteStream, track]);
     });
     console.log("track event - REMOTE");
   });
-
-
-
-
 
   // Initiate the offer and  localDesc then add it to the db
   const startCall = async () => {
@@ -330,92 +324,244 @@ export default function App() {
       offer: offer,
     });
 
-   
     setPConn(PC);
-    console.log("start PC: "+JSON.stringify(PC))
+    // console.log("start PC: " + JSON.stringify(PC));
   };
 
-  
-  //Listen for the answer and add it into remoteDesc
-  onValue(ref(DB, "calls/" + uniqueId + "/"+ "answer"), (snapshot) => {
+  //Listener for the answer and add it into remoteDesc
+  onValue(ref(DB, "calls/" + uniqueId + "/" + "answer"), (snapshot) => {
     const data = snapshot.val();
     if (data !== null && uniqueId !== undefined) {
-
       const answerDescription = data.answer;
-      sdpAnswers.current.push(data.answer);
+      sdpAnswers.current.push(data.answer.sdp);
+      // console.log("sdpAnswerRef Len: " + sdpAnswers.current.length);
+      let infiniteLoop;
+      if (sdpAnswers.current.length >= 2) {
+        infiniteLoop = sdpAnswers.current[
+          sdpAnswers.current.length - 2
+        ].includes(data.answer.sdp);
+      }
 
-      console.log("sdpAnswerRef Len: "+sdpAnswers.current.length)
+      // console.log("sdp: " + JSON.stringify(sdpAnswers.current, null, 4));
+      // console.log("loop: " + infiniteLoop);
 
-     let infiniteLoop = sdpAnswers.current.includes(data.answer);
+      if (sdpAnswers.current.length >= 2) {
+        // console.log("2 oldu");
 
-      if(sdpAnswers.current.length >= 2){
-        console.log("2 oldu")
-        if(infiniteLoop === false){
-          console.log("infinite yok girdi")
-          if(!answerDataBoolean){
-            setAnswerData(answerDescription)
-            setAnswerDataBoolean(true)
+        if (infiniteLoop === false) {
+          // console.log("infinite yok girdi");
+
+          if (!answerDataBoolean) {
+            setAnswerData(answerDescription);
+            setAnswerDataBoolean(true);
           }
         }
-        if(infiniteLoop){
-          console.log("infinite");
+        if (infiniteLoop) {
+          // console.log("infinite");
+
           sdpAnswers.current.pop();
+
+          // console.log("sdpAnswerRef Len: " + sdpAnswers.current.length);
+          // console.log(
+          //   "sdp popped: " + JSON.stringify(sdpAnswers.current, null, 4)
+          // );
         }
-      }
-      else{
-        console.log("1 oldu")
-        if(!answerDataBoolean){
-          console.log("1 oldu girdi")
-          setAnswerData(answerDescription)
-          setAnswerDataBoolean(true)
+      } else {
+        // console.log("1 oldu");
+
+        if (!answerDataBoolean) {
+          // console.log("1 oldu girdi");
+
+          setAnswerData(answerDescription);
+          setAnswerDataBoolean(true);
         }
       }
     }
   });
 
-
-  if(answerDataBoolean){
-    console.log("oldu: "+ JSON.stringify(answerData))
-    console.log("local: "+ JSON.stringify(pConn))
+  if (answerDataBoolean) {
+    // console.log("oldu: " + JSON.stringify(answerData));
+    // console.log("local: " + JSON.stringify(pConn));
 
     // set PC == pConn
-    PC.setRemoteDescription(answerData);
-    setAnswerDataBoolean(false)
+    // console.log("pc before: " + JSON.stringify(PC));
+    const assignAnswerDataFunc = async() => {
+      PC = pConn;
+      await PC.setLocalDescription(pConn.localDescription)
+      await PC.setRemoteDescription(answerData)
+          // console.log("pc after: " + JSON.stringify(PC));
+          setAnswerDataBoolean(false);
+          setPConn(PC);
+    } 
+    assignAnswerDataFunc()
   }
 
+  //Listener for the answerCandidate and add it into ICE Candidate
+  onValue(
+    ref(DB, "calls/" + uniqueId + "/" + "answerCandidate"),
+    (snapshot) => {
+      const data = snapshot.val();
+      if (data !== null && uniqueId !== undefined) {
+        // console.log("type: "+typeof data)
+        // console.log("type candidate: "+typeof data?.candidate)
+        // console.log("data: "+JSON.stringify(data.candidate.candidate))
 
-  //APPLY SAME LOGIC
-  //Listen for the answerCandidate and add it into ICE Candidate
-  // onValue(
-  //   ref(DB, "calls/" + uniqueId + "/" + "answerCandidate"),
-  //   (snapshot) => {
-  //     if(snapshot.val() !== null){
-  //       snapshot?.forEach((candidateObj) => {
-  //         const newCandidate = new RTCIceCandidate(candidateObj);
-  //         PC.addIceCandidate(new RTCIceCandidate(newCandidate));
-  //         console.log("RTC Candidate: " + JSON.stringify(newCandidate));
-  //       });
-  //     }
-     
-  //   }
-  // );
+        answerCandidates.current.push(data);
 
-  //Listen for the offerCandidate and add it into ICE Candidate
-  onValue(ref(DB, "calls/" + roomId + "/" + "offerCandidate"), (snapshot) => {
-    if(join){
-      snapshot?.forEach((candidateObj) => {
-        const newCandidate = new RTCIceCandidate(candidateObj);
-        PCRemote.addIceCandidate(new RTCIceCandidate(newCandidate));
-        console.log("RTC Remote Candidate: " + JSON.stringify(newCandidate));
-      });
+        let infiniteLoop;
+        if (answerCandidates.current.length >= 2) {
+          infiniteLoop = answerCandidates.current[
+            answerCandidates.current.length - 2
+          ].candidate.candidate.includes(data.candidate.candidate);
+        }
+
+        // console.log("answerCandidates: " + JSON.stringify(answerCandidates.current, null, 4));
+        // console.log("loop: " + infiniteLoop);
+
+        if (answerCandidates.current.length >= 2) {
+          // console.log("2 oldu");
+
+          if (infiniteLoop === false) {
+            // console.log("infinite yok girdi");
+
+            if (!answerCandidateDataBoolean) {
+              setAnswerCandidateData([...answerCandidateData, data]);
+              setAnswerCandidateDataBoolean(true);
+            }
+          }
+          if (infiniteLoop) {
+            // console.log("infinite");
+
+            answerCandidates.current.pop();
+
+            // console.log("answerCandidates Len: " + answerCandidates.current.length);
+            // console.log(
+            //   "answerCandidates popped: " +
+            //     JSON.stringify(answerCandidates.current, null, 4)
+            // );
+          }
+        } else {
+          // console.log("1 oldu");
+
+          if (!answerCandidateDataBoolean) {
+            // console.log("1 oldu girdi");
+
+            setAnswerCandidateData([...answerCandidateData, data]);
+            setAnswerCandidateDataBoolean(true);
+          }
+        }
+      }
     }
-  });
+  );
 
- 
+  if (answerCandidateDataBoolean) {
+    const assignAnswerCandidateFunc = async () => {
+      PC = pConn;
+      // console.log("RTC Local Candidate Before: " + JSON.stringify(PC));
+
+      // console.log("offer type: "+typeof answerCandidateData)
+      // console.log("inside offer: "+JSON.stringify(answerCandidateData))
+
+      answerCandidateData.forEach(async (candidateObj) => {
+        // console.log("obj: " + JSON.stringify(candidateObj));
+
+        await PC.addIceCandidate(candidateObj.candidate);
+
+        // console.log("eklendi");
+        // console.log("RTC Local Candidate After: " + JSON.stringify(PC));
+      });
+
+      setPConn(PC);
+      console.log("pc local: "+ JSON.stringify(PC));
+      setAnswerCandidateDataBoolean(false);
+    };
+    assignAnswerCandidateFunc();
+    console.log("pc local again: "+ JSON.stringify(PC));
+  }
+
+  //Listener for the offerCandidate and add it into ICE Candidate
+  onValue(
+    ref(DB, "calls/" + uniqueHostId + "/" + "offerCandidate"),
+    (snapshot) => {
+      const data = snapshot.val();
+      if (data !== null && uniqueHostId !== undefined) {
+        // console.log("type: "+typeof data)
+        // console.log("type candidate: "+typeof data?.candidate)
+        // console.log("data: "+JSON.stringify(data.candidate.candidate))
+
+        offerCandidates.current.push(data);
+
+        let infiniteLoop;
+        if (offerCandidates.current.length >= 2) {
+          infiniteLoop = offerCandidates.current[
+            offerCandidates.current.length - 2
+          ].candidate.candidate.includes(data.candidate.candidate);
+        }
+
+        // console.log("offerCandidates: " + JSON.stringify(offerCandidates.current, null, 4));
+        // console.log("loop: " + infiniteLoop);
+
+        if (offerCandidates.current.length >= 2) {
+          // console.log("2 oldu");
+
+          if (infiniteLoop === false) {
+            // console.log("infinite yok girdi");
+
+            if (!offerCandidateDataBoolean) {
+              setOfferCandidateData([...offerCandidateData, data]);
+              setOfferCandidateDataBoolean(true);
+            }
+          }
+          if (infiniteLoop) {
+            // console.log("infinite");
+            offerCandidates.current.pop();
+
+            // console.log("offerCandidates Len: " + offerCandidates.current.length);
+            // console.log(
+            //   "offerCandidates popped: " +
+            //     JSON.stringify(offerCandidates.current, null, 4)
+            // );
+          }
+        } else {
+          // console.log("1 oldu");
+
+          if (!offerCandidateDataBoolean) {
+            // console.log("1 oldu girdi");
+
+            setOfferCandidateData([...offerCandidateData, data]);
+            setOfferCandidateDataBoolean(true);
+          }
+        }
+      }
+    }
+  );
+
+  if (offerCandidateDataBoolean) {
+    const assignOfferCandidateFunc = async () => {
+      PCRemote = rpConn;
+      // console.log("RTC Remote Candidate Before: " + JSON.stringify(PCRemote));
+
+      // console.log("offer type: "+typeof offerCandidateData)
+      // console.log("inside offer: "+JSON.stringify(offerCandidateData))
+
+      offerCandidateData.forEach(async (candidateObj) => {
+        // console.log("obj: " + JSON.stringify(candidateObj));
+
+        await PCRemote.addIceCandidate(candidateObj.candidate);
+        // console.log("eklendi");
+        // console.log("RTC Remote Candidate After: " + JSON.stringify(PCRemote));
+      });
+
+      setRPConn(PCRemote);
+      console.log("pc remote: "+ JSON.stringify(PCRemote));
+      setOfferCandidateDataBoolean(false);
+    };
+    assignOfferCandidateFunc();
+    console.log("pc remote again: "+ JSON.stringify(PCRemote));
+  }
 
   // Join the remote call
   const joinCall = async () => {
-   
     // Get the offer from db and answer it
     const dbRef = ref(DB);
     let snapshot = await get(child(dbRef, "calls/" + roomId));
@@ -439,14 +585,11 @@ export default function App() {
     }
 
     setRPConn(PCRemote);
-    setJoin(true);
-
+    setUniqueHostId(roomId);
+    //setJoin(true);
   };
 
-
-  const sendMessage = () => {
-   
-  };
+  const sendMessage = () => {};
 
   // Close
   const closeStreams = () => {
