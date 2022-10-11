@@ -57,7 +57,6 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [join, setJoin] = useState(false);
   const [pConn, setPConn] = useState();
-  const [rpConn, setRPConn] = useState();
   const scrollViewRef = useRef(ScrollView);
 
   const [answerData, setAnswerData] = useState();
@@ -79,6 +78,9 @@ export default function App() {
   const [uniqueHostId, setUniqueHostId] = useState();
   let hostId;
 
+  let localCandidate = false;
+  let remoteCandidate = false;
+
   const configuration = {
     iceServers: [
       {
@@ -86,12 +88,8 @@ export default function App() {
       },
     ],
   };
-
   let PC = new RTCPeerConnection(configuration);
-  // Set new peerConn for the remote
-  let PCRemote = new RTCPeerConnection(configuration);
-
-  const dataChannel = PC.createDataChannel("chat_channel");
+  let dataChannel = PC.createDataChannel("my_channel",{negotiated:true});
 
   const startLocalStream = async () => {
     const isFront = true;
@@ -122,15 +120,15 @@ export default function App() {
 
     try {
       newStream._tracks.forEach((track) => {
-        PC.addTrack(track, newStream._tracks);
+        let trackObJ = PC.addTrack(track, newStream._tracks);
       });
+      setPConn(PC);
     } catch (error) {
       console.log("error localStream getTracks: " + error);
     }
   };
 
   // EVENT LISTENERS
-
   PC.addEventListener("connectionstatechange", (event) => {
     switch (PC.connectionState) {
       case "new":
@@ -215,13 +213,15 @@ export default function App() {
   });
 
   PC.addEventListener("datachannel", (event) => {
-    console.log("datachannel " + event);
-    // Now you've got the datachannel.
-    // You can hookup and use the same events as above ^
+    console.log("datachannel stringify " + JSON.stringify(event));
   });
 
   dataChannel.addEventListener("open", (event) => {
     console.log("dataChannel is open " + JSON.stringify(event));
+    dataChannel._id = 0
+    console.log("_id: "+dataChannel._id)
+    console.log("id: "+dataChannel.id)
+    dataChannel.send("mesaj deneme")
   });
 
   dataChannel.addEventListener("close", (event) => {
@@ -241,53 +241,50 @@ export default function App() {
 
     const dbRef = ref(DB);
 
-    get(child(dbRef, "calls/" + hostId + "/" + "offerCandidate"))
-      .then((snapshot) => {
-        if (snapshot.exists()) {
-          // console.log(snapshot.val());
-        } else {
-          const offerCandidate = ref(
-            DB,
-            "calls/" + hostId + "/" + "offerCandidate/"
-          );
-          set(offerCandidate, {
-            candidate: event.candidate,
-          });
-        }
-      })
-      .catch((error) => {
-        console.error(error);
-      });
 
-    // console.log("canditate: " + JSON.stringify(event));
-  });
-
-  //ICECandidate listener for remote
-  PCRemote.addEventListener("icecandidate", (event) => {
-    if (!event.candidate) {
-      return;
+    if (localCandidate) {
+      get(child(dbRef, "calls/" + hostId + "/" + "offerCandidate"))
+        .then((snapshot) => {
+          if (snapshot.exists()) {
+            // console.log(snapshot.val());
+          } else {
+            const offerCandidate = ref(
+              DB,
+              "calls/" + hostId + "/" + "offerCandidate/"
+            );
+            set(offerCandidate, {
+              candidate: event.candidate,
+            });
+          }
+        })
+        .catch((error) => {
+          console.error(error);
+        });
+      localCandidate = false;
     }
 
-    const dbRef = ref(DB);
+    if (remoteCandidate) {
+      get(child(dbRef, "calls/" + roomId + "/" + "answerCandidate"))
+        .then((snapshot) => {
+          if (snapshot.exists()) {
+            // console.log(snapshot.val());
+          } else {
+            const answerCandidate = ref(
+              DB,
+              "calls/" + roomId + "/" + "answerCandidate/"
+            );
+            set(answerCandidate, {
+              candidate: event.candidate,
+            });
+          }
+        })
+        .catch((error) => {
+          console.error(error);
+        });
+      remoteCandidate = false;
+    }
 
-    get(child(dbRef, "calls/" + roomId + "/" + "answerCandidate"))
-      .then((snapshot) => {
-        if (snapshot.exists()) {
-          // console.log(snapshot.val());
-        } else {
-          const answerCandidate = ref(
-            DB,
-            "calls/" + roomId + "/" + "answerCandidate/"
-          );
-          set(answerCandidate, {
-            candidate: event.candidate,
-          });
-        }
-      })
-      .catch((error) => {
-        console.error(error);
-      });
-    // console.log("remote canditate: " + JSON.stringify(event));
+    // console.log("canditate: " + JSON.stringify(event));
   });
 
   //Add remote stream to the video obj
@@ -297,36 +294,6 @@ export default function App() {
     });
     console.log("track event");
   });
-
-  //Add remote stream to the video obj
-  PCRemote.addEventListener("track", (event) => {
-    event.streams[0].getTracks().forEach((track) => {
-      setRemoteStream([...remoteStream, track]);
-    });
-    console.log("track event - REMOTE");
-  });
-
-  // Initiate the offer and  localDesc then add it to the db
-  const startCall = async () => {
-    const offerDescription = await PC.createOffer();
-    await PC.setLocalDescription(offerDescription);
-
-    const offer = {
-      sdp: offerDescription.sdp,
-      type: offerDescription.type,
-    };
-
-    hostId = uuid.v4();
-    setUniqueId(hostId);
-
-    const SdpOffer = ref(DB, "calls/" + hostId + "/" + "offer");
-    await set(SdpOffer, {
-      offer: offer,
-    });
-
-    setPConn(PC);
-    // console.log("start PC: " + JSON.stringify(PC));
-  };
 
   //Listener for the answer and add it into remoteDesc
   onValue(ref(DB, "calls/" + uniqueId + "/" + "answer"), (snapshot) => {
@@ -380,20 +347,15 @@ export default function App() {
   });
 
   if (answerDataBoolean) {
-    // console.log("oldu: " + JSON.stringify(answerData));
-    // console.log("local: " + JSON.stringify(pConn));
-
-    // set PC == pConn
-    // console.log("pc before: " + JSON.stringify(PC));
-    const assignAnswerDataFunc = async() => {
+    const assignAnswerDataFunc = async () => {
       PC = pConn;
-      await PC.setLocalDescription(pConn.localDescription)
-      await PC.setRemoteDescription(answerData)
-          // console.log("pc after: " + JSON.stringify(PC));
-          setAnswerDataBoolean(false);
-          setPConn(PC);
-    } 
-    assignAnswerDataFunc()
+      await PC.setLocalDescription(pConn.localDescription);
+      await PC.setRemoteDescription(answerData);
+      // console.log("pc after: " + JSON.stringify(PC));
+      setAnswerDataBoolean(false);
+      setPConn(PC);
+    };
+    assignAnswerDataFunc();
   }
 
   //Listener for the answerCandidate and add it into ICE Candidate
@@ -445,7 +407,6 @@ export default function App() {
 
           if (!answerCandidateDataBoolean) {
             // console.log("1 oldu girdi");
-
             setAnswerCandidateData([...answerCandidateData, data]);
             setAnswerCandidateDataBoolean(true);
           }
@@ -470,13 +431,12 @@ export default function App() {
         // console.log("eklendi");
         // console.log("RTC Local Candidate After: " + JSON.stringify(PC));
       });
-
       setPConn(PC);
-      console.log("pc local: "+ JSON.stringify(PC));
+      // console.log("pc local: " + JSON.stringify(PC));
       setAnswerCandidateDataBoolean(false);
     };
     assignAnswerCandidateFunc();
-    console.log("pc local again: "+ JSON.stringify(PC));
+    // console.log("pc local again: " + JSON.stringify(PC));
   }
 
   //Listener for the offerCandidate and add it into ICE Candidate
@@ -527,7 +487,6 @@ export default function App() {
 
           if (!offerCandidateDataBoolean) {
             // console.log("1 oldu girdi");
-
             setOfferCandidateData([...offerCandidateData, data]);
             setOfferCandidateDataBoolean(true);
           }
@@ -538,27 +497,62 @@ export default function App() {
 
   if (offerCandidateDataBoolean) {
     const assignOfferCandidateFunc = async () => {
-      PCRemote = rpConn;
-      // console.log("RTC Remote Candidate Before: " + JSON.stringify(PCRemote));
-
+      PC = pConn;
       // console.log("offer type: "+typeof offerCandidateData)
       // console.log("inside offer: "+JSON.stringify(offerCandidateData))
 
       offerCandidateData.forEach(async (candidateObj) => {
         // console.log("obj: " + JSON.stringify(candidateObj));
 
-        await PCRemote.addIceCandidate(candidateObj.candidate);
-        // console.log("eklendi");
-        // console.log("RTC Remote Candidate After: " + JSON.stringify(PCRemote));
+        await PC.addIceCandidate(candidateObj.candidate);
       });
 
-      setRPConn(PCRemote);
-      console.log("pc remote: "+ JSON.stringify(PCRemote));
+      setPConn(PC);
+      console.log("pc remote: " + JSON.stringify(PC));
       setOfferCandidateDataBoolean(false);
     };
     assignOfferCandidateFunc();
-    console.log("pc remote again: "+ JSON.stringify(PCRemote));
+    console.log("pc remote again: " + JSON.stringify(PC));
   }
+
+  // Initiate the offer and  localDesc then add it to the db
+  const startCall = async () => {
+    console.log("girdi");
+    localCandidate = true;
+    const offerDescription = await PC.createOffer();
+    await PC.setLocalDescription(offerDescription);
+
+    pConn.localDescription = offerDescription;
+    pConn._peerConnectionId = PC._peerConnectionId;
+    for (let i = 0; i < pConn._transceivers.length; i++) {
+      pConn._transceivers[i].transceiver._peerConnectionId =
+        PC._peerConnectionId;
+      pConn._transceivers[i].transceiver._sender._peerConnectionId =
+        PC._peerConnectionId;
+      pConn._transceivers[i].transceiver._receiver._peerConnectionId =
+        PC._peerConnectionId;
+      pConn._transceivers[i].transceiver._receiver._track._peerConnectionId =
+        PC._peerConnectionId;
+    }
+    PC._transceivers = pConn._transceivers;
+    setPConn(PC);
+
+    const offer = {
+      sdp: offerDescription.sdp,
+      type: offerDescription.type,
+    };
+
+    hostId = uuid.v4();
+    setUniqueId(hostId);
+
+    const SdpOffer = ref(DB, "calls/" + hostId + "/" + "offer");
+    await set(SdpOffer, {
+      offer: offer,
+    });
+
+    console.log("PC IN THE CALL: " + JSON.stringify(PC));
+    // console.log("start PC: " + JSON.stringify(PC));
+  };
 
   // Join the remote call
   const joinCall = async () => {
@@ -567,11 +561,28 @@ export default function App() {
     let snapshot = await get(child(dbRef, "calls/" + roomId));
     if (snapshot !== null) {
       const data = snapshot.val();
-      const offerDesc = data.offer?.offer;
-      await PCRemote.setRemoteDescription(offerDesc);
+      remoteCandidate = true;
+      const offerDescription = data.offer?.offer;
+      await PC.setRemoteDescription(offerDescription);
 
-      const answerDescription = await PCRemote.createAnswer();
-      await PCRemote.setLocalDescription(answerDescription);
+      const answerDescription = await PC.createAnswer();
+      await PC.setLocalDescription(answerDescription);
+
+      pConn.localDescription = answerDescription;
+      pConn.remoteDescription = offerDescription;
+      pConn._peerConnectionId = PC._peerConnectionId;
+      for (let i = 0; i < pConn._transceivers.length; i++) {
+        pConn._transceivers[i].transceiver._peerConnectionId =
+          PC._peerConnectionId;
+        pConn._transceivers[i].transceiver._sender._peerConnectionId =
+          PC._peerConnectionId;
+        pConn._transceivers[i].transceiver._receiver._peerConnectionId =
+          PC._peerConnectionId;
+        pConn._transceivers[i].transceiver._receiver._track._peerConnectionId =
+          PC._peerConnectionId;
+      }
+      PC._transceivers = pConn._transceivers;
+      setPConn(PC);
 
       const answer = {
         type: answerDescription.type,
@@ -584,9 +595,10 @@ export default function App() {
       });
     }
 
-    setRPConn(PCRemote);
     setUniqueHostId(roomId);
+
     //setJoin(true);
+    console.log("PC Remote IN THE CALL: " + JSON.stringify(PC));
   };
 
   const sendMessage = () => {};
