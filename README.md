@@ -1,4 +1,5 @@
 # REACT NATIVE WEBRTC CHAT APP # 
+## Codes are not complete. ##
 
 * [Download](https://github.com/jitsi/webrtc/releases/download/v106.0.0/android-webrtc.zip) this package to be able to use WebRTC on Android <br/>
   * Place these files into `\node_modules\react-native-webrtc\android\libs`
